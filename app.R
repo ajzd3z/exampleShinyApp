@@ -1,6 +1,6 @@
+# Mark Li
 library(shiny)
 library(shinyjs)
-library(lattice)
 
 # reference variables for output
 basePriorDistribution <- c("Standard uniform", "Standard normal", "Randomly generated")
@@ -23,7 +23,7 @@ exampleProbabilityString <- "0.65, 0.7, 0.9, 0.3, 0.2"
 
 # N = total flips, z = heads
 bernoulliLikelihood <- function(theta, N, z) {
-  if (N < z || z < 0) {
+  if (theta > 1 || theta < 0 || N < z || z < 0) {
     stop("bernoulliLikelihood: N or z incorrectly set")
   }
   return (theta^z * (1 - theta)^(N - z))
@@ -75,21 +75,26 @@ computePosterior <- function(likelihoodValues, priorValues) {
 setInitialPriorDistribution <- function(likelihoodFormula, subdivisions, densityFunction) {
   from <- 0
   to <- 0
-  if (likelihoodFormula == 2) { # poisson
-    from <- 1
-    to <- 100
-  } else { # bernoulli or geometric
+  
+  #if (likelihoodFormula == 2) { # poisson
+  #  from <- 1
+  #  to <- 100
+  #} else { # bernoulli or geometric
     from <- 0
     to <- 1
-  }
+  # }
   parameterSubdivisions <<- seq(from, to, length.out = subdivisions)
   subdivisionProbability <<- densityFunction(parameterSubdivisions)
   subdivisionProbability <<- subdivisionProbability/sum(subdivisionProbability)
 }
 
+# setting up intial values for first display
+setInitialPriorDistribution(1, initialSubdivisions, dnorm)
+tempProb <- subdivisionProbability
 # initialize the default information 
 setInitialPriorDistribution(1, initialSubdivisions, dunif)
 likelihoodValues <- bernoulliLikelihood(parameterSubdivisions, initialTotalFlips, initialHeads)
+print(computePosterior(likelihoodValues, subdivisionProbability) == computePosterior(likelihoodValues, tempProb))
 
 ui <- fluidPage(
   useShinyjs(),
@@ -128,7 +133,7 @@ ui <- fluidPage(
                  textInput(   inputId = paste(parameterType[2], "_csv", sep = ''), label = "Comma seperated outcomes", exampleOutcomeString),
                  
                  numericInput(inputId = paste(parameterType[3], "_csv", sep = ''), label = "y/Total Flips", value = "10"),
-                 actionButton("setLikelihood", "Set Likelihood distribution"),
+                 actionButton("setLikelihood", "Set Likelihood function"),
                  br(),
                  br(),
                  helpText("Use grid method to compute posterior"),
@@ -152,14 +157,13 @@ server <- function(input, output, session) {
   # Using shinyjs
   observe({
     if (firstRun) {
-      #print("first run")
       output$priorPlot <- renderPlot({
-        plot(parameterSubdivisions, subdivisionProbability, lty = 1, lwd = 5, pch = 20, cex = 0.25)
+        plot(parameterSubdivisions, subdivisionProbability, lty = 1, lwd = 5, pch = 20, cex = 0.25, main = "Prior Distribution")
         #scatter.smooth(parameterSubdivisions, subdivisionProbability)
       })
       
       output$likelihoodPlot <- renderPlot({
-        plot(parameterSubdivisions, bernoulliLikelihood(parameterSubdivisions, initialTotalFlips, initialHeads), lty = 1, lwd = 2, pch = 20, cex = 0.5)
+        plot(parameterSubdivisions, bernoulliLikelihood(parameterSubdivisions, initialTotalFlips, initialHeads), lty = 1, lwd = 5, pch = 20, cex = 0.25, main = "Likelihood Function")
       })
       
       firstRun <<- FALSE
@@ -172,6 +176,12 @@ server <- function(input, output, session) {
       for (boxesToShow in parameterToShow) {
           show(paste(currentParameter, boxesToShow, sep = ''))
       }
+    }
+    
+    if (currentParameter == parameterType[2]) {
+      disable("setLikelihood")
+    } else {
+      enable("setLikelihood")
     }
     
     # hides the unneeded boxes using the list object correspondingInputBoxes
@@ -208,20 +218,14 @@ server <- function(input, output, session) {
     }
     
     output$priorPlot <- renderPlot({
-      plot(parameterSubdivisions, subdivisionProbability, lty = 1, pch = 20)
+      plot(parameterSubdivisions, subdivisionProbability, lty = 1, lwd = 5, pch = 20, cex = 0.25, main = "Prior Distribution")
     })
   })
   
   updateLikelihood <- observeEvent(input$setLikelihood, {
     
     baseFormula <- input$likelihoodFormulas
-    selectedLikelihood <- strtoi(input$likelihoodFormulas)
-    selectedSubdivisions <- input$subdivisions
-        
-    if (length(parameterSubdivisions) == 0 ||
-        selectedLikelihood < 1 || selectedLikelihood > 3) {
-      stop()
-    }    
+    
     if (baseFormula == "1") { # bernoulliLikelihood
       z <- input$bernoulliParameterValue_numberHeads
       N <- input$bernoulliParameterValue_totalFlips
@@ -237,21 +241,21 @@ server <- function(input, output, session) {
     }
     
     output$likelihoodPlot <- renderPlot({
-      plot(parameterSubdivisions, likelihoodValues, lty = 1, pch = 20)
+      plot(parameterSubdivisions, likelihoodValues, lty = 1, lwd = 5, pch = 20, cex = 0.25, main = "Likelihood Function")
     })
   })
   
   updatePosteriorGraph <- observeEvent(input$updatePosterior, {
     posteriorProbability <<- computePosterior(likelihoodValues, subdivisionProbability)
     output$posteriorPlot <- renderPlot({
-      plot(parameterSubdivisions, posteriorProbability, lty = 1, pch = 20)
+      plot(parameterSubdivisions, posteriorProbability, lty = 1, lwd = 5, pch = 20, cex = 0.25, main = "Posterior Distribution")
     })
   })
   
   copyPosteriortoPrior <- observeEvent(input$posteriorToPrior, {
     subdivisionProbability <<- posteriorProbability
     output$priorPlot <- renderPlot({
-      plot(parameterSubdivisions, subdivisionProbability, lty = 1, pch = 20)
+      plot(parameterSubdivisions, subdivisionProbability, lty = 1, lwd = 5, pch = 20, cex = 0.25, main = "Prior Distribution")
     })
   })
   
@@ -263,11 +267,11 @@ server <- function(input, output, session) {
     }
     
     output$priorPlot <- renderPlot({
-      plot(parameterSubdivisions, subdivisionProbability, lty = 1, pch = 20)
+      plot(parameterSubdivisions, subdivisionProbability, lty = 1, lwd = 5, pch = 20, cex = 0.25, main = "Prior Distribution")
     })
     
     output$posteriorPlot <- renderPlot({
-      plot(parameterSubdivisions, posteriorProbability, lty = 1, pch = 20)
+      plot(parameterSubdivisions, posteriorProbability, lty = 1, lwd = 5, pch = 20, cex = 0.25, main = "Posterior Distribution")
     })
   })
 }
