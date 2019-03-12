@@ -1,4 +1,6 @@
 # Mark Li
+# prior_posterior calculator
+
 library(shiny)
 library(shinyjs)
 
@@ -9,15 +11,18 @@ correspondingInputBoxes <- list("bernoulliParameterValue" = c("_numberHeads", "_
 
 # Global Variables 
 parameterSubdivisions <- c()
-subdivisionProbability <- c()
+subdivisionProbability <- c() # TODO: maybe rename to priorProbability
 likelihoodValues <- c()
-initialSubdivisions <- 100
 likelihoodFormula <- 1 # bernoulli 
 firstRun <- TRUE
 posteriorProbability <- c()
 
-initialHeads <- 10
-initialTotalFlips <- 40
+# used to fill out input boxes, not used afterwards
+initialSubdivisions <- 11
+initialHeads <- 1
+initialTotalFlips <- 4
+initialGeometricFlips <- 5
+initialIterationCount <- 5
 exampleOutcomeString <- "3, 3, 4, 5, 6, 3, 2, 2, 1, 3, 7, 8, 6, 4, 4"
 exampleProbabilityString <- "0.65, 0.7, 0.9, 0.3, 0.2"
 
@@ -94,7 +99,8 @@ tempProb <- subdivisionProbability
 # initialize the default information 
 setInitialPriorDistribution(1, initialSubdivisions, dunif)
 likelihoodValues <- bernoulliLikelihood(parameterSubdivisions, initialTotalFlips, initialHeads)
-print(computePosterior(likelihoodValues, subdivisionProbability) == computePosterior(likelihoodValues, tempProb))
+#print(computePosterior(likelihoodValues, subdivisionProbability) == computePosterior(likelihoodValues, tempProb))
+print(likelihoodValues)
 
 ui <- fluidPage(
   useShinyjs(),
@@ -132,7 +138,7 @@ ui <- fluidPage(
                  
                  textInput(   inputId = paste(parameterType[2], "_csv", sep = ''), label = "Comma seperated outcomes", exampleOutcomeString),
                  
-                 numericInput(inputId = paste(parameterType[3], "_csv", sep = ''), label = "y/Total Flips", value = "10"),
+                 numericInput(inputId = paste(parameterType[3], "_csv", sep = ''), label = "y/Total Flips", value = initialGeometricFlips),
                  actionButton("setLikelihood", "Set Likelihood function"),
                  br(),
                  br(),
@@ -141,13 +147,14 @@ ui <- fluidPage(
                  actionButton("posteriorToPrior", "Copy posterior to prior"),
                  br(), 
                  br(),
-                 numericInput(inputId = "iterationCount", label = "Number of iterations of updating posterior, then copying to prior", value = 5),
+                 numericInput(inputId = "iterationCount", label = "Number of iterations of updating posterior, then copying to prior", value = initialIterationCount),
                  actionButton("iterate", "Run iterations")
     ),
     mainPanel(
       plotOutput(outputId = "priorPlot"), 
       plotOutput(outputId = "likelihoodPlot"), 
-      plotOutput(outputId = "posteriorPlot")
+      plotOutput(outputId = "posteriorPlot"),
+      tableOutput("posteriorTable")
     )
   )
 )
@@ -250,6 +257,7 @@ server <- function(input, output, session) {
     output$posteriorPlot <- renderPlot({
       plot(parameterSubdivisions, posteriorProbability, lty = 1, lwd = 5, pch = 20, cex = 0.25, main = "Posterior Distribution")
     })
+    output$posteriorTable <- renderTable(data.frame("p" = parameterSubdivisions, "Prior" = subdivisionProbability, "Likelihood" = likelihoodValues, "Posterior" = posteriorProbability))
   })
   
   copyPosteriortoPrior <- observeEvent(input$posteriorToPrior, {
@@ -263,6 +271,12 @@ server <- function(input, output, session) {
     count <- input$iterationCount
     for (i in 1:count) {
       posteriorProbability <<- computePosterior(likelihoodValues, subdivisionProbability)
+
+      # table update moved inside loop to prevent prior and posterior probabilities being equal
+      if (i == count) {
+        oldPrior <- subdivisionProbability
+        output$posteriorTable <- renderTable(data.frame("p" = parameterSubdivisions, "Prior" = oldPrior, "Likelihood function value" = likelihoodValues, "Posterior" = posteriorProbability))
+      }
       subdivisionProbability <<- posteriorProbability
     }
     
