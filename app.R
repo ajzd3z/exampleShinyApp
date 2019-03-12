@@ -1,5 +1,6 @@
 library(shiny)
 library(shinyjs)
+library(lattice)
 
 # reference variables for output
 basePriorDistribution <- c("Standard uniform", "Standard normal", "Randomly generated")
@@ -22,6 +23,9 @@ exampleProbabilityString <- "0.65, 0.7, 0.9, 0.3, 0.2"
 
 # N = total flips, z = heads
 bernoulliLikelihood <- function(theta, N, z) {
+  if (N < z || z < 0) {
+    stop("bernoulliLikelihood: N or z incorrectly set")
+  }
   return (theta^z * (1 - theta)^(N - z))
 }
 
@@ -54,14 +58,17 @@ poissonLikelihood <- function(lambdas, outcomeString) {
   # return ((prod(exp(-1 * lambda * outcomes)) * prod(lambda^outcomes))/(prod(factorial(outcomes))))
 }
 
-# lambda is poisson parameter, outcome is a string like "1,2,3,4"
-geometricLikelihood <- function(theta, probabilityString) {
-  
+# seen from similar perspectives as coin flips
+geometricLikelihood <- function(theta, y) {
+  if ((theta > 1 || theta < 0) || !is.integer(y) || y < 1) {
+    stop()
+  }
+  return((1 - theta)^(y - 1)*theta)
 }
 
 computePosterior <- function(likelihoodValues, priorValues) {
-  print(likelihoodValues * priorValues)
-  print(sum(likelihoodValues * priorValues))
+  #print(likelihoodValues * priorValues)
+  #print(sum(likelihoodValues * priorValues))
   return((likelihoodValues * priorValues)/sum(likelihoodValues * priorValues))
 }
 
@@ -109,28 +116,28 @@ ui <- fluidPage(
                  radioButtons(inputId = "likelihoodFormulas", 
                               label = "Likelihood function to use",
                               choices = list(
-                                "Bernoulli (Coin flipping example) [0, 1]" = 1,
-                                "Poisson [0, inf)" = 2,
-                                "Geometric [0, inf)" = 3
+                                "Bernoulli (Coin flipping example from textbook)" = 1,
+                                "Poisson (not working)" = 2,
+                                "Geometric" = 3
                               ),
                               selected = 1
                               ),
-                 numericInput(inputId = parameterType[1], label = "True Bernoulli Parameter Value", value = 0.5),
                  numericInput(inputId = paste(parameterType[1], "_numberHeads", sep = ''), label = "Number of heads", value = initialHeads),
                  numericInput(inputId = paste(parameterType[1], "_totalFlips", sep = ''), label = "Total flips", value = initialTotalFlips),
                  
-                 numericInput(inputId = parameterType[2], label = "True Poisson Parameter Value", value = 3),
                  textInput(   inputId = paste(parameterType[2], "_csv", sep = ''), label = "Comma seperated outcomes", exampleOutcomeString),
                  
-                 numericInput(inputId = parameterType[3], label = "True Geometric Parameter Value", value = 3),
-                 textInput(   inputId = paste(parameterType[3], "_csv", sep = ''), label = "Comma seperated probabilities", exampleProbabilityString),
+                 numericInput(inputId = paste(parameterType[3], "_csv", sep = ''), label = "y/Total Flips", value = "10"),
                  actionButton("setLikelihood", "Set Likelihood distribution"),
-                 br(),
                  br(),
                  br(),
                  helpText("Use grid method to compute posterior"),
                  actionButton("updatePosterior", "Compute posterior"),
-                 actionButton("posteriorToPrior", "Copy posterior to prior")
+                 actionButton("posteriorToPrior", "Copy posterior to prior"),
+                 br(), 
+                 br(),
+                 numericInput(inputId = "iterationCount", label = "Number of iterations of updating posterior, then copying to prior", value = 5),
+                 actionButton("iterate", "Run iterations")
     ),
     mainPanel(
       plotOutput(outputId = "priorPlot"), 
@@ -147,7 +154,8 @@ server <- function(input, output, session) {
     if (firstRun) {
       #print("first run")
       output$priorPlot <- renderPlot({
-        plot(parameterSubdivisions, subdivisionProbability, type = "h", lty = 1, lwd = 5, pch = 20, cex = 0.5, col = "blue")
+        plot(parameterSubdivisions, subdivisionProbability, lty = 1, lwd = 5, pch = 20, cex = 0.25)
+        #scatter.smooth(parameterSubdivisions, subdivisionProbability)
       })
       
       output$likelihoodPlot <- renderPlot({
@@ -200,7 +208,7 @@ server <- function(input, output, session) {
     }
     
     output$priorPlot <- renderPlot({
-      plot(parameterSubdivisions, subdivisionProbability, pch = 20, lty = 2)
+      plot(parameterSubdivisions, subdivisionProbability, lty = 1, pch = 20)
     })
   })
   
@@ -209,17 +217,6 @@ server <- function(input, output, session) {
     baseFormula <- input$likelihoodFormulas
     selectedLikelihood <- strtoi(input$likelihoodFormulas)
     selectedSubdivisions <- input$subdivisions
-    
-    # in case the parameter support set changes
-    if (input$priorFormulas == "1") {
-      setInitialPriorDistribution(selectedLikelihood, selectedSubdivisions, dunif)
-    } else if (input$priorFormulas == "2") {
-      setInitialPriorDistribution(selectedLikelihood, selectedSubdivisions, dnorm)
-    } else if (input$priorFormulas == "3") {
-      setInitialPriorDistribution(selectedLikelihood, selectedSubdivisions, runif)
-    } else {
-      stop()
-    }
         
     if (length(parameterSubdivisions) == 0 ||
         selectedLikelihood < 1 || selectedLikelihood > 3) {
@@ -232,11 +229,11 @@ server <- function(input, output, session) {
     } else if (baseFormula == "2") { # poissonLikelihood
       outcomeString <- input$poissonParameterValue_csv
       likelihoodValues <<- poissonLikelihood(parameterSubdivisions, outcomeString)
-      print(poissonLikelihood(parameterSubdivisions, outcomeString))
     } else if (baseFormula == "3") { # geometricLikelihood
-      stop()
+      y <- input$geometricParameterValue_csv
+      likelihoodValues <<- geometricLikelihood(parameterSubdivisions, y)
     } else {
-      stop()
+      stop("How did this happen?")
     }
     
     output$likelihoodPlot <- renderPlot({
@@ -252,10 +249,25 @@ server <- function(input, output, session) {
   })
   
   copyPosteriortoPrior <- observeEvent(input$posteriorToPrior, {
-    print(subdivisionProbability == posteriorProbability)
     subdivisionProbability <<- posteriorProbability
     output$priorPlot <- renderPlot({
       plot(parameterSubdivisions, subdivisionProbability, lty = 1, pch = 20)
+    })
+  })
+  
+  runIterations <- observeEvent(input$iterate, {
+    count <- input$iterationCount
+    for (i in 1:count) {
+      posteriorProbability <<- computePosterior(likelihoodValues, subdivisionProbability)
+      subdivisionProbability <<- posteriorProbability
+    }
+    
+    output$priorPlot <- renderPlot({
+      plot(parameterSubdivisions, subdivisionProbability, lty = 1, pch = 20)
+    })
+    
+    output$posteriorPlot <- renderPlot({
+      plot(parameterSubdivisions, posteriorProbability, lty = 1, pch = 20)
     })
   })
 }
